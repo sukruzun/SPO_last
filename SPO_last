@@ -1,0 +1,125 @@
+from datetime import date,datetime,timedelta
+import matplotlib as plot
+from scipy.stats import linregress
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import numpy as np
+import pandas as pd
+import urllib.request
+from matplotlib.dates import DateFormatter
+import os, re
+from os import mkdir, makedirs
+import pandas as pd
+import seaborn as sns
+import xlrd
+
+# USGS plot function
+def get_usgs(usgs_id, start_date, end_date):
+    
+    file_path = f'https://waterdata.usgs.gov/nwis/dv?cb_00060=on&format=rdb&site_no={usgs_id}&referred_module=sw&period=&begin_date={start_date}&end_date={end_date}'
+    names = ['agency', 'site_no', 'datetime', 'discharge_cfs', 'datavalue_dis']
+    df_usgs = pd.read_csv(file_path, sep='\t', skiprows=29, names=names, header=None, 
+                      parse_dates=['datetime'], index_col=['datetime'])
+    
+    # Remove duplicated values
+    df_usgs = df_usgs[~df_usgs.index.duplicated(keep='first')]
+    
+    # Clean DataFrame
+    df_usgs.drop(inplace=True, columns=['agency', 'site_no', 'datavalue_dis'])
+    
+    return df_usgs
+
+def truncate(n, decimals=0):
+    multiplier = 10 ** decimals
+    return int(n * multiplier) / multiplier
+
+# Station information
+usgs_id = '06810000'
+start_date = date(1957, 1, 1)
+end_date = date(2016, 12, 31)
+
+# Get data and add to a Pandas DataFrame
+df_usgs = get_usgs(usgs_id, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+
+# See how data looks like
+df_usgs
+
+#SPO Analysis***
+
+# Create a DataFrame with mean discharge for each day of year for each year
+df = pd.DataFrame()
+
+for i in df_usgs.index:
+    year = i.strftime('%Y')
+    df.loc[int(i.strftime('%j')), f'{year}'] = df_usgs.loc[i, 'discharge_cfs']
+
+# Remove the days 1 to 8 and from 209 to 366
+# Create a list with the days of the year that you want to exclude
+exclude_index = []
+for i in range(1,9):
+    exclude_index.append(i)
+for i in range (209,367):
+    exclude_index.append(i)
+# Drop rows for those days
+df = df.drop(index=exclude_index)
+
+# Drop all years with NaN values
+df = df.dropna(axis='columns')
+
+# Calculate mean discharge for each year (day 9 to day 208)
+df2 = pd.DataFrame()
+for i in df.columns:
+    df2.loc[i, 'mean'] = round(df[f'{i}'].mean(),1)
+    
+# Calculate Departure
+df3 = pd.DataFrame()
+
+for year in df.columns:
+    for i in df.index:
+        df3.loc[i, f'{year}'] = df.loc[i, f'{year}'] - df2.loc[year, 'mean']
+
+# Calculate Cummulative Departure
+df4 = pd.DataFrame()
+
+for year in df3.columns:
+    for i in df3.index:
+        if i == 9:
+            df4.loc[i, f'{year}'] = df3.loc[i, f'{year}']
+        else:
+            df4.loc[i, f'{year}'] = df3.loc[i, f'{year}'] + df4.loc[i-1, f'{year}']
+            
+# Calculate mean discharge for each year (day 9 to day 208)
+df5 = pd.DataFrame()
+for i in df4.columns:
+    x = df4[f'{i}'].min()
+    df5.loc[i, 'day'] = df4.index[df4[f'{i}']==x][0]
+    df5.loc[i, 'min'] = x
+    df5.loc[i, 'year'] = int(i)
+df5
+
+# Plot results
+
+fig = plt.subplots(figsize=(10,5))
+x = df5.year
+y = df5.day
+stats = linregress(x, y)
+m = stats.slope
+b = stats.intercept
+plt.scatter(x, y)
+plt.plot(x, m * x + b, color="red")
+plt.title('SPO')
+plt.ylabel('SPO (day)')
+plt.ylim(0,220)
+plt.grid(color='grey', linestyle='-', linewidth=0.25, alpha=0.5)
+plt.text(1920,200,'y={:.2f}+{:.2f}*x'.format(b,m),color='darkblue',size=12)
+plt.draw()
+
+#Find SPO date difference
+SPOi = [m*1957+b]
+SPOf = [m*2016+b]
+Diff = [(m*2016+b) - (m*1957+b)]
+
+print ("SPOi = ", SPOi)
+print ("SPOf = ", SPOf)
+print ('Diff = ', Diff)
+print
